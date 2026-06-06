@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="TeamUSA hero fallback">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#071326"/>
+      <stop offset="0.48" stop-color="#140819"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="blue" cx="72%" cy="25%" r="55%">
+      <stop offset="0" stop-color="#1687ff" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#1687ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="red" cx="22%" cy="58%" r="55%">
+      <stop offset="0" stop-color="#ff123a" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#ff123a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect width="1600" height="900" fill="url(#blue)"/>
+  <rect width="1600" height="900" fill="url(#red)"/>
+  <path d="M0 660c192-80 351-112 514-72 184 44 304 23 466-50 230-104 410-78 620 30v332H0z" fill="#030712" opacity=".72"/>
+  <path d="M924 140c160 26 302 112 424 258-200-90-401-120-602-88 44-68 103-124 178-170Z" fill="#1687ff" opacity=".36"/>
+  <path d="M196 234c174 88 317 197 430 328-208-82-377-143-505-184 13-55 38-103 75-144Z" fill="#ff123a" opacity=".35"/>
+  <g fill="#fff" opacity=".42">
+    <circle cx="1192" cy="176" r="4"/>
+    <circle cx="1266" cy="218" r="3"/>
+    <circle cx="1327" cy="289" r="5"/>
+    <circle cx="1096" cy="236" r="3"/>
+  </g>
+</svg>

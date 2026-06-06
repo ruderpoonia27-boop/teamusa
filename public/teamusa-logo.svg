@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TeamUSA logo">
+  <defs>
+    <linearGradient id="navy" x1="32" x2="224" y1="20" y2="236" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07142c"/>
+      <stop offset="0.55" stop-color="#030712"/>
+      <stop offset="1" stop-color="#071a3c"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="46" x2="170" y1="84" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b63d8"/>
+      <stop offset="1" stop-color="#28a8ff"/>
+    </linearGradient>
+    <linearGradient id="red" x1="52" x2="204" y1="86" y2="188" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff123a"/>
+      <stop offset="1" stop-color="#b9001f"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <circle cx="128" cy="128" r="124" fill="url(#navy)"/>
+  <circle cx="128" cy="128" r="118" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+  <circle cx="128" cy="128" r="103" fill="none" stroke="#0f63c8" stroke-opacity="0.34" stroke-width="6"/>
+
+  <path d="M54 91c27-31 78-46 126-30 8 3 17 7 25 12-49-8-93 0-126 25l-25-7Z" fill="url(#blue)" filter="url(#glow)"/>
+  <path d="M52 122c34 4 64 14 88 31 20 14 35 30 44 48-30-23-65-38-104-45-13-2-25-7-37-14l9-20Z" fill="url(#red)"/>
+  <path d="M61 101c42 8 75 21 99 38 17 12 29 26 35 41-20-20-49-36-86-48-24-8-44-17-59-27l11-4Z" fill="#ff1f42"/>
+
+  <path d="M103 103c29 12 61 12 96-1-10 20-31 34-61 41l-9 37-18-31c-18-5-31-15-39-29 10-1 21-6 31-17Z" fill="#f8fafc"/>
+  <path d="M158 118c20-8 36-8 50 1-15 0-27 7-36 21 2-13-3-19-14-22Z" fill="#061126"/>
+  <circle cx="159" cy="121" r="8" fill="#061126"/>
+  <circle cx="162" cy="118" r="3" fill="#f8fafc"/>
+
+  <g fill="#ffffff" filter="url(#glow)">
+    <path d="m143 48 4 9 10 1-7 7 2 10-9-5-9 5 2-10-7-7 10-1 4-9Z"/>
+    <path d="m176 55 4 9 10 1-7 7 2 10-9-5-9 5 2-10-7-7 10-1 4-9Z"/>
+  </g>
+
+  <text x="128" y="176" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-size="34" font-weight="900" fill="#ffffff" letter-spacing="1">TEAM</text>
+  <text x="128" y="214" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-size="48" font-weight="900" letter-spacing="2">
+    <tspan fill="#1687ff">U</tspan><tspan fill="#ffffff">S</tspan><tspan fill="#ff123a">A</tspan>
+  </text>
+</svg>
