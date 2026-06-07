@@ -20,7 +20,9 @@ export async function api(path, options = {}) {
       const data = await response.json();
       activeApiUrl = apiUrl;
       if (response.ok) return data;
-      throw new Error(data.message || `API returned ${response.status}`);
+      const error = new Error(data.message || `API returned ${response.status}`);
+      error.status = response.status;
+      throw error;
     } catch (error) {
       if (error.name !== "TypeError") throw error;
       lastError = error;

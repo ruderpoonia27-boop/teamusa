@@ -8,6 +8,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Tags,
   Trash2,
   Upload,
   Users,
@@ -28,6 +29,7 @@ function createEmptyVideo(catalog = { categories: defaultCategories, sections: d
     videoHd: null,
     videoSd: null,
     duration: "00:00",
+    views: "0",
     status: "approved",
     premiumOnly: true,
   };
@@ -132,6 +134,38 @@ export default function AdminPage({ token, isAdmin }) {
     }
   };
 
+  const updateUserBlock = async (userId, isBlocked) => {
+    setNotice("");
+    setError("");
+    try {
+      await api(`/api/admin/users/${userId}/block`, {
+        method: "PATCH",
+        token,
+        body: { isBlocked },
+      });
+      setNotice(isBlocked ? "User blocked." : "User unblocked.");
+      await loadUsers();
+    } catch (nextError) {
+      setError(nextError.message || "Could not update user block status.");
+    }
+  };
+
+  const deleteUser = async (userId) => {
+    if (!window.confirm("Delete this user permanently?")) return;
+    setNotice("");
+    setError("");
+    try {
+      await api(`/api/admin/users/${userId}`, {
+        method: "DELETE",
+        token,
+      });
+      setNotice("User deleted.");
+      await loadUsers();
+    } catch (nextError) {
+      setError(nextError.message || "Could not delete user.");
+    }
+  };
+
   const saveCatalogItem = async (event) => {
     event.preventDefault();
     setLoading(true);
@@ -217,7 +251,7 @@ export default function AdminPage({ token, isAdmin }) {
       const data = await api("/api/admin/payment-settings", {
         method: "PATCH",
         token,
-        body: buildPaymentSettingsFormData(paymentForm),
+        body: await buildPaymentSettingsFormData(paymentForm),
       });
       const settings = data.settings;
       const priceAmount = String((settings.priceAmount || 0) / 100);
@@ -255,24 +289,27 @@ export default function AdminPage({ token, isAdmin }) {
 
     try {
       if (editingId) {
-        await api(`/api/admin/videos/${editingId}`, {
+        const data = await api(`/api/admin/videos/${editingId}`, {
           method: "PATCH",
           token,
           body: buildVideoFormData(form),
         });
+        setVideos((current) =>
+          current.map((video) => ((video._id || video.id) === editingId ? data.video : video)),
+        );
         setNotice("Video updated.");
       } else {
-        await api("/api/admin/videos", {
+        const data = await api("/api/admin/videos", {
           method: "POST",
           token,
           body: buildVideoFormData(form),
         });
-      setNotice("Video added. Members can watch it after payment.");
+        setVideos((current) => [data.video, ...current]);
+        setNotice("Video added. Ready for the next upload.");
       }
       setForm(createEmptyVideo(catalog));
       setEditingId("");
       setFormKey((value) => value + 1);
-      await loadVideos();
     } catch (nextError) {
       setError(nextError.message || "Could not add video.");
     } finally {
@@ -292,6 +329,7 @@ export default function AdminPage({ token, isAdmin }) {
       videoHd: null,
       videoSd: null,
       duration: video.duration || "00:00",
+      views: String(video.views || 0),
       status: video.status || "approved",
       premiumOnly: video.premiumOnly !== false,
     });
@@ -361,12 +399,51 @@ export default function AdminPage({ token, isAdmin }) {
           onClick={() => setActiveSection("users")}
         />
         <SectionButton
+          active={activeSection === "categories"}
+          icon={<Tags size={17} />}
+          label="Categories"
+          onClick={() => setActiveSection("categories")}
+        />
+        <SectionButton
           active={activeSection === "settings"}
           icon={<Settings size={17} />}
           label="Settings"
           onClick={() => setActiveSection("settings")}
         />
       </div>
+
+      {activeSection === "categories" ? (
+        <div className="grid gap-5 lg:grid-cols-[420px_1fr]">
+          <form className="glass grid gap-4 rounded-lg p-6" onSubmit={saveCatalogItem}>
+            <h2 className="flex items-center gap-2 text-2xl font-black">
+              <Tags size={22} />
+              Categories
+            </h2>
+            <AdminInput
+              label="New Category"
+              value={catalogForm.name}
+              onChange={(name) => setCatalogForm({ kind: "category", name })}
+            />
+            <button
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-champagne font-black text-black"
+              disabled={loading}
+              type="submit"
+            >
+              {loading ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} />}
+              Create Category
+            </button>
+          </form>
+
+          <section className="glass rounded-lg p-6">
+            <CatalogList
+              title="Video Categories"
+              items={catalogItems.filter((item) => item.kind === "category")}
+              lockedNames={defaultCategories}
+              onDelete={removeCatalogItem}
+            />
+          </section>
+        </div>
+      ) : null}
 
       {activeSection === "settings" ? (
       <div className="grid gap-5 lg:grid-cols-[420px_1fr]">
@@ -573,10 +650,16 @@ export default function AdminPage({ token, isAdmin }) {
                   <h3 className="font-black">{item.name || "Member"}</h3>
                   <p className="mt-1 text-sm text-stone-400">{item.email}</p>
                   {item.isPremium && item.planName ? (
-                    <p className="mt-1 text-xs text-champagne">Plan: {item.planName}</p>
+                    <p className="mt-1 text-xs text-champagne">
+                      Plan: {item.planName}
+                      {item.remainingDays ? ` • ${item.remainingDays} days left` : ""}
+                    </p>
                   ) : null}
                   {item.premiumUntil ? (
                     <p className="mt-1 text-xs text-stone-500">Expires: {formatDate(item.premiumUntil)}</p>
+                  ) : null}
+                  {item.isBlocked ? (
+                    <p className="mt-1 text-xs font-bold text-orange-200">Blocked account</p>
                   ) : null}
                   <p className="mt-1 text-xs text-stone-500">
                     {item.role} • {item.isPremium ? "Premium active" : "Free account"}
@@ -615,6 +698,28 @@ export default function AdminPage({ token, isAdmin }) {
                       </button>
                     </>
                   )}
+                  {item.role !== "admin" ? (
+                    <>
+                      <button
+                        className={`rounded-lg px-4 py-2 text-sm font-bold ${
+                          item.isBlocked
+                            ? "border border-plasma/20 bg-plasma/10 text-plasma"
+                            : "border border-orange-400/20 bg-orange-500/10 text-orange-200"
+                        }`}
+                        onClick={() => updateUserBlock(item.id, !item.isBlocked)}
+                        type="button"
+                      >
+                        {item.isBlocked ? "Unblock" : "Block"}
+                      </button>
+                      <button
+                        className="rounded-lg border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm font-bold text-red-200"
+                        onClick={() => deleteUser(item.id)}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -677,13 +782,13 @@ export default function AdminPage({ token, isAdmin }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <AdminFileInput
                 accept="video/*"
-                label="HD Video File"
+                label="HD Video File (Optional)"
                 value={form.videoHd}
                 onChange={(videoHd) => applyVideoFileWithDuration(videoHd, setForm, "videoHd")}
               />
               <AdminFileInput
                 accept="video/*"
-                label="SD Video File"
+                label="SD Video File (Optional)"
                 value={form.videoSd}
                 onChange={(videoSd) => applyVideoFileWithDuration(videoSd, setForm, "videoSd")}
               />
@@ -691,6 +796,9 @@ export default function AdminPage({ token, isAdmin }) {
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <AdminInput label="Duration" value={form.duration} onChange={(duration) => setForm({ ...form, duration })} />
+            <AdminInput label="Views" value={form.views} onChange={(views) => setForm({ ...form, views })} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
             <AdminSelect
               label="Status"
               value={form.status}
@@ -837,7 +945,9 @@ function AdminSelect({ label, value, options, onChange }) {
   );
 }
 
-function CatalogList({ title, items, onDelete }) {
+function CatalogList({ title, items, lockedNames = [], onDelete }) {
+  const lockedSet = new Set(lockedNames.map((name) => name.toLowerCase()));
+
   return (
     <div className="rounded-lg border border-white/10 bg-black/25 p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -845,22 +955,31 @@ function CatalogList({ title, items, onDelete }) {
         <span className="text-xs font-bold text-stone-500">{items.length} active</span>
       </div>
       <div className="grid gap-2">
-        {items.map((item) => (
-          <div
-            className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3"
-            key={item.id}
-          >
-            <span className="min-w-0 truncate text-sm font-bold text-stone-200">{item.name}</span>
-            <button
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-200"
-              onClick={() => onDelete(item)}
-              type="button"
-              aria-label={`Delete ${item.name}`}
+        {items.map((item) => {
+          const locked = lockedSet.has(String(item.name || "").toLowerCase());
+          return (
+            <div
+              className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3"
+              key={item.id}
             >
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
+              <span className="min-w-0 truncate text-sm font-bold text-stone-200">{item.name}</span>
+              <button
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${
+                  locked
+                    ? "cursor-not-allowed border-white/10 bg-white/5 text-stone-600"
+                    : "border-red-400/20 bg-red-500/10 text-red-200"
+                }`}
+                disabled={locked}
+                onClick={() => onDelete(item)}
+                type="button"
+                aria-label={`Delete ${item.name}`}
+                title={locked ? "Default category" : "Delete category"}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -987,7 +1106,7 @@ function formatVideoDuration(value) {
 function buildVideoFormData(form) {
   const payload = new FormData();
 
-  for (const field of ["title", "creator", "category", "section", "duration", "status"]) {
+  for (const field of ["title", "creator", "category", "section", "duration", "views", "status"]) {
     payload.append(field, form[field]);
   }
   payload.append("premiumOnly", String(form.premiumOnly));
@@ -1000,7 +1119,7 @@ function buildVideoFormData(form) {
   return payload;
 }
 
-function buildPaymentSettingsFormData(form) {
+async function buildPaymentSettingsFormData(form) {
   const payload = new FormData();
   payload.append("planName", form.planName);
   payload.append("priceAmount", form.priceAmount);
@@ -1011,8 +1130,56 @@ function buildPaymentSettingsFormData(form) {
   payload.append("paymentMessage", form.paymentMessage);
   payload.append("plans", JSON.stringify(form.plans));
   if (form.upiQr) payload.append("upiQr", form.upiQr);
-  if (form.heroImage) payload.append("heroImage", form.heroImage);
+  if (form.heroImage) payload.append("heroImage", await optimizeHeroImage(form.heroImage));
   if (form.clearQr) payload.append("clearQr", "true");
   if (form.clearHero) payload.append("clearHero", "true");
   return payload;
+}
+
+function optimizeHeroImage(file) {
+  if (!file?.type?.startsWith("image/")) return file;
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      const maxWidth = 1600;
+      const ratio = Math.min(1, maxWidth / image.width);
+      const width = Math.max(1, Math.round(image.width * ratio));
+      const height = Math.max(1, Math.round(image.height * ratio));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        resolve(file);
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+
+          const optimizedName = file.name.replace(/\.[^.]+$/, "") || "hero";
+          resolve(new File([blob], `${optimizedName}.jpg`, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        0.76,
+      );
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    image.src = objectUrl;
+  });
 }

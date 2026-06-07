@@ -3,6 +3,15 @@ import React from "react";
 import { demoWatchHistory } from "../data/catalog.js";
 
 export default function DashboardPage({ user, notice, onPayment }) {
+  const planSummary = user?.isPremium ? user?.planName || "Premium" : "None";
+  const expirySummary = user?.isPremium
+    ? user?.remainingDays
+      ? `${user.remainingDays} days left`
+      : user?.premiumUntil
+        ? formatDate(user.premiumUntil)
+        : "Active"
+    : "Locked";
+
   return (
     <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
       <div className="mb-8">
@@ -18,8 +27,8 @@ export default function DashboardPage({ user, notice, onPayment }) {
           title="Membership Status"
           value={user?.isPremium ? "Active Premium" : "Free Browsing"}
         />
-        <DashboardCard icon={<CreditCard />} title="Active Plan" value={user?.planName || user?.plan || "None"} />
-        <DashboardCard icon={<BadgeCheck />} title="Premium Badge" value={user?.isPremium ? "Enabled" : "Locked"} />
+        <DashboardCard icon={<CreditCard />} title="Active Plan" value={planSummary} />
+        <DashboardCard icon={<BadgeCheck />} title="Subscription" value={expirySummary} />
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
@@ -46,8 +55,16 @@ export default function DashboardPage({ user, notice, onPayment }) {
           <p className="mt-3 text-sm leading-6 text-stone-300">
             Manage account settings, payment method, and plan upgrades from here.
           </p>
-          {user?.premiumUntil ? (
-            <p className="mt-3 text-sm text-champagne">Expires: {formatDate(user.premiumUntil)}</p>
+          {user?.isPremium ? (
+            <div className="mt-4 grid gap-2 rounded-lg border border-champagne/15 bg-champagne/10 p-4 text-sm">
+              <p className="font-bold text-champagne">Plan: {planSummary}</p>
+              {user?.remainingDays ? (
+                <p className="text-stone-200">{user.remainingDays} days remaining</p>
+              ) : null}
+              {user?.premiumUntil ? (
+                <p className="text-stone-300">Expires: {formatDate(user.premiumUntil)}</p>
+              ) : null}
+            </div>
           ) : null}
           <button
             className="mt-5 rounded-lg bg-champagne px-5 py-3 font-black text-black"

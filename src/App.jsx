@@ -24,7 +24,16 @@ export default function App() {
     if (!token) return;
     api("/api/auth/me", { token })
       .then((session) => storeSession(session))
-      .catch(() => {});
+      .catch((error) => {
+        if (error.status === 401 || error.status === 403) {
+          clearSession();
+          setToken("");
+          setUser(null);
+          setView("home");
+          setAuthMode("signin");
+          setAuthOpen(true);
+        }
+      });
   }, [token]);
 
   const storeSession = (session) => {

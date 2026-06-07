@@ -21,12 +21,6 @@ export default function Header({
           <span className="text-xl font-black tracking-normal">TeamUSA</span>
         </button>
 
-        <nav className="hidden items-center gap-6 text-sm text-stone-300 md:flex">
-          <a href="#featured">Featured</a>
-          <a href="#trending">Trending</a>
-          <a href="#categories">Categories</a>
-        </nav>
-
         <div className="flex items-center gap-2">
           {user ? (
             <>

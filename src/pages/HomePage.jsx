@@ -16,7 +16,7 @@ export default function HomePage({ token, isPremium, onUnlock }) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [selectedVideo, setSelectedVideo] = useState(null);
-  const [heroImageUrl, setHeroImageUrl] = useState("");
+  const [heroImageUrl, setHeroImageUrl] = useState(getCachedHeroImage);
   const [showPremiumPrompt, setShowPremiumPrompt] = useState(false);
   const [error, setError] = useState("");
 
@@ -30,7 +30,9 @@ export default function HomePage({ token, isPremium, onUnlock }) {
             : defaultCategories,
           sections: catalogData.catalog?.sections?.length ? catalogData.catalog.sections : defaultSections,
         });
-        setHeroImageUrl(settingsData.settings?.heroImageUrl || "");
+        const nextHeroImageUrl = settingsData.settings?.heroImageUrl || "";
+        setHeroImageUrl(nextHeroImageUrl);
+        cacheHeroImage(nextHeroImageUrl);
       })
       .catch((nextError) => setError(nextError.message || "Could not load videos."));
   }, [token, isPremium]);
@@ -66,8 +68,17 @@ export default function HomePage({ token, isPremium, onUnlock }) {
     <>
       <section
         className="luxury-gradient relative min-h-[560px] sm:min-h-[620px] lg:min-h-[680px]"
-        style={heroImageUrl ? { "--hero-photo": `url("${heroImageUrl}")` } : undefined}
       >
+        {heroImageUrl ? (
+          <img
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover object-center"
+            decoding="async"
+            fetchPriority="high"
+            loading="eager"
+            src={heroImageUrl}
+          />
+        ) : null}
         <div className="absolute inset-0 bg-gradient-to-t from-velvet via-transparent to-black/20" />
         <div className="relative mx-auto grid min-h-[560px] max-w-7xl items-end gap-8 px-4 pb-12 pt-24 sm:min-h-[620px] sm:px-6 lg:min-h-[680px] lg:grid-cols-[minmax(0,1fr)_360px] lg:pb-16">
           <div className="max-w-4xl">
@@ -194,4 +205,24 @@ export default function HomePage({ token, isPremium, onUnlock }) {
       ) : null}
     </>
   );
+}
+
+function getCachedHeroImage() {
+  try {
+    return window.localStorage.getItem("teamusa_hero_image") || "";
+  } catch {
+    return "";
+  }
+}
+
+function cacheHeroImage(url) {
+  try {
+    if (url) {
+      window.localStorage.setItem("teamusa_hero_image", url);
+    } else {
+      window.localStorage.removeItem("teamusa_hero_image");
+    }
+  } catch {
+    // Local storage can be unavailable in private browsing; ignore cache failures.
+  }
 }
