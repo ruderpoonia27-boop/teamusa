@@ -1129,7 +1129,7 @@ async function buildPaymentSettingsFormData(form) {
   payload.append("paymentLink", form.paymentLink);
   payload.append("paymentMessage", form.paymentMessage);
   payload.append("plans", JSON.stringify(form.plans));
-  if (form.upiQr) payload.append("upiQr", form.upiQr);
+  if (form.upiQr) payload.append("upiQr", await optimizeQrImage(form.upiQr));
   if (form.heroImage) payload.append("heroImage", await optimizeHeroImage(form.heroImage));
   if (form.clearQr) payload.append("clearQr", "true");
   if (form.clearHero) payload.append("clearHero", "true");
@@ -1137,6 +1137,23 @@ async function buildPaymentSettingsFormData(form) {
 }
 
 function optimizeHeroImage(file) {
+  return optimizeImage(file, {
+    maxWidth: 1600,
+    outputName: "hero",
+    outputType: "image/jpeg",
+    quality: 0.76,
+  });
+}
+
+function optimizeQrImage(file) {
+  return optimizeImage(file, {
+    maxWidth: 720,
+    outputName: "upi-scanner",
+    outputType: "image/png",
+  });
+}
+
+function optimizeImage(file, options) {
   if (!file?.type?.startsWith("image/")) return file;
 
   return new Promise((resolve) => {
@@ -1146,7 +1163,7 @@ function optimizeHeroImage(file) {
     image.onload = () => {
       URL.revokeObjectURL(objectUrl);
 
-      const maxWidth = 1600;
+      const maxWidth = options.maxWidth;
       const ratio = Math.min(1, maxWidth / image.width);
       const width = Math.max(1, Math.round(image.width * ratio));
       const height = Math.max(1, Math.round(image.height * ratio));
@@ -1168,11 +1185,12 @@ function optimizeHeroImage(file) {
             return;
           }
 
-          const optimizedName = file.name.replace(/\.[^.]+$/, "") || "hero";
-          resolve(new File([blob], `${optimizedName}.jpg`, { type: "image/jpeg" }));
+          const optimizedName = file.name.replace(/\.[^.]+$/, "") || options.outputName;
+          const extension = options.outputType === "image/png" ? "png" : "jpg";
+          resolve(new File([blob], `${optimizedName}.${extension}`, { type: options.outputType }));
         },
-        "image/jpeg",
-        0.76,
+        options.outputType,
+        options.quality,
       );
     };
 

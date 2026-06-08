@@ -47,8 +47,6 @@ function buildApiUrls() {
   return [
     import.meta.env.VITE_API_URL,
     `http://${browserHost}:4000`,
-    `http://${browserHost}:4001`,
-    `http://${browserHost}:4002`,
     "http://localhost:4000",
     "http://127.0.0.1:4000",
   ].filter(Boolean);

@@ -10,6 +10,7 @@ export default function PaymentPage({ user, notice, onAuth }) {
   const [actionNotice, setActionNotice] = useState("");
   const [copied, setCopied] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("days15");
+  const [qrFailed, setQrFailed] = useState(false);
 
   useEffect(() => {
     api("/api/payment-settings")
@@ -30,6 +31,10 @@ export default function PaymentPage({ user, notice, onAuth }) {
   };
   const plans = paymentSettings.plans?.length ? paymentSettings.plans : fallbackPremiumPlans;
   const selectedPlan = plans.find((item) => item.id === selectedPlanId) || plans[0];
+
+  useEffect(() => {
+    setQrFailed(false);
+  }, [paymentSettings.qrImageUrl]);
 
   const openPaymentLink = async () => {
     setActionNotice("");
@@ -123,9 +128,16 @@ export default function PaymentPage({ user, notice, onAuth }) {
           </ul>
 
           <div className="mt-7 grid gap-4 rounded-lg border border-white/10 bg-black/30 p-4 md:grid-cols-[220px_1fr]">
-            <div className="grid min-h-56 place-items-center rounded-lg bg-white p-3">
-              {paymentSettings.qrImageUrl ? (
-                <img className="max-h-52 w-full object-contain" src={paymentSettings.qrImageUrl} alt="UPI scanner" />
+            <div className="mx-auto grid aspect-square w-full max-w-64 place-items-center rounded-lg bg-white p-3 md:max-w-none">
+              {paymentSettings.qrImageUrl && !qrFailed ? (
+                <img
+                  className="max-h-52 w-full object-contain"
+                  src={paymentSettings.qrImageUrl}
+                  alt="UPI scanner"
+                  decoding="async"
+                  loading="eager"
+                  onError={() => setQrFailed(true)}
+                />
               ) : (
                 <QrCode className="text-black" size={80} />
               )}
