@@ -25,6 +25,7 @@ function createEmptyVideo(catalog = { categories: defaultCategories, sections: d
     category: catalog.categories?.[0] || defaultCategories[0],
     section: catalog.sections?.[0] || defaultSections[0],
     thumbnail: null,
+    generatedThumbnail: null,
     video: null,
     videoHd: null,
     videoSd: null,
@@ -292,7 +293,7 @@ export default function AdminPage({ token, isAdmin }) {
         const data = await api(`/api/admin/videos/${editingId}`, {
           method: "PATCH",
           token,
-          body: buildVideoFormData(form),
+          body: await buildVideoFormData(form),
         });
         setVideos((current) =>
           current.map((video) => ((video._id || video.id) === editingId ? data.video : video)),
@@ -302,7 +303,7 @@ export default function AdminPage({ token, isAdmin }) {
         const data = await api("/api/admin/videos", {
           method: "POST",
           token,
-          body: buildVideoFormData(form),
+          body: await buildVideoFormData(form),
         });
         setVideos((current) => [data.video, ...current]);
         setNotice("Video added. Ready for the next upload.");
@@ -325,6 +326,7 @@ export default function AdminPage({ token, isAdmin }) {
       category: video.category || catalog.categories[0],
       section: video.section || catalog.sections[0],
       thumbnail: null,
+      generatedThumbnail: null,
       video: null,
       videoHd: null,
       videoSd: null,
@@ -771,7 +773,7 @@ export default function AdminPage({ token, isAdmin }) {
               accept="image/*"
               label={editingId ? "Replace Thumbnail (Optional)" : "Thumbnail Image (Optional)"}
               value={form.thumbnail}
-              onChange={(thumbnail) => setForm({ ...form, thumbnail })}
+              onChange={(thumbnail) => setForm({ ...form, thumbnail, generatedThumbnail: thumbnail ? null : form.generatedThumbnail })}
             />
             <AdminFileInput
               accept="video/*"
@@ -1061,11 +1063,17 @@ async function applyVideoFileWithDuration(file, setForm, field) {
   setForm((current) => ({ ...current, [field]: file }));
 
   try {
-    const duration = await readVideoDuration(file);
+    const [durationResult, thumbnailResult] = await Promise.allSettled([
+      readVideoDuration(file),
+      generateVideoThumbnail(file),
+    ]);
+    const duration = durationResult.status === "fulfilled" ? durationResult.value : "";
+    const generatedThumbnail = thumbnailResult.status === "fulfilled" ? thumbnailResult.value : null;
     setForm((current) => ({
       ...current,
       [field]: file,
       duration: duration || current.duration,
+      generatedThumbnail: current.thumbnail ? current.generatedThumbnail : generatedThumbnail || current.generatedThumbnail,
     }));
   } catch {
     setForm((current) => ({ ...current, [field]: file }));
@@ -1090,6 +1098,60 @@ function readVideoDuration(file) {
   });
 }
 
+function generateVideoThumbnail(file) {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+    let settled = false;
+    const timer = window.setTimeout(() => finish(null), 8000);
+
+    const finish = (thumbnail) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      URL.revokeObjectURL(objectUrl);
+      resolve(thumbnail);
+    };
+
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.onloadedmetadata = () => {
+      const targetTime = Math.min(2, Math.max(0.1, (video.duration || 2) / 4));
+      video.currentTime = targetTime;
+    };
+    video.onseeked = () => {
+      const width = 720;
+      const ratio = video.videoWidth ? width / video.videoWidth : 1;
+      const height = Math.max(1, Math.round((video.videoHeight || 405) * ratio));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        finish(null);
+        return;
+      }
+
+      context.drawImage(video, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            finish(null);
+            return;
+          }
+          finish(new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "video"}-thumbnail.jpg`, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        0.82,
+      );
+    };
+    video.onerror = () => finish(null);
+    video.src = objectUrl;
+  });
+}
+
 function formatVideoDuration(value) {
   if (!Number.isFinite(value) || value <= 0) return "";
   const totalSeconds = Math.round(value);
@@ -1103,7 +1165,7 @@ function formatVideoDuration(value) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function buildVideoFormData(form) {
+async function buildVideoFormData(form) {
   const payload = new FormData();
 
   for (const field of ["title", "creator", "category", "section", "duration", "views", "status"]) {
@@ -1111,7 +1173,11 @@ function buildVideoFormData(form) {
   }
   payload.append("premiumOnly", String(form.premiumOnly));
 
-  if (form.thumbnail) payload.append("thumbnail", form.thumbnail);
+  const fallbackThumbnail =
+    form.thumbnail ||
+    form.generatedThumbnail ||
+    (form.video || form.videoHd || form.videoSd ? await generateVideoThumbnail(form.video || form.videoHd || form.videoSd) : null);
+  if (fallbackThumbnail) payload.append("thumbnail", fallbackThumbnail);
   if (form.video) payload.append("video", form.video);
   if (form.videoHd) payload.append("videoHd", form.videoHd);
   if (form.videoSd) payload.append("videoSd", form.videoSd);

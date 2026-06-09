@@ -1,18 +1,25 @@
 import { Eye, Lock, Play, UserRound } from "lucide-react";
-import React from "react";
-import { defaultVideoImage } from "../data/catalog.js";
+import React, { useState } from "react";
 
 export default function VideoCard({ video, isPremium, onPlay }) {
   const isLocked = Boolean(video.locked || (!isPremium && video.premiumOnly !== false));
+  const [imageFailed, setImageFailed] = useState(false);
+  const thumbnailUrl = video.thumbnailUrl || video.image || "";
 
   return (
     <article className="group overflow-hidden rounded-lg border border-white/10 bg-white/[0.06] transition hover:-translate-y-1 hover:border-champagne/40 hover:shadow-gold">
       <div className={`relative aspect-video overflow-hidden ${isLocked ? "locked-media" : "unlocked-media"}`}>
-        <img
-          alt={video.title}
-          className="h-full w-full object-cover transition duration-500"
-          src={video.thumbnailUrl || video.image || defaultVideoImage}
-        />
+        {thumbnailUrl && !imageFailed ? (
+          <img
+            alt={video.title}
+            className="h-full w-full object-cover transition duration-500"
+            src={thumbnailUrl}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-br from-zinc-950 via-zinc-900 to-black" />
+        )}
+        {video.premiumOnly !== false ? <div className="absolute inset-0 bg-black/18" /> : null}
         <div className="absolute left-3 top-3 rounded-full bg-black/70 px-3 py-1 text-xs font-black text-champagne">
           Premium
         </div>
