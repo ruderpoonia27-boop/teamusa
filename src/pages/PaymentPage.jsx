@@ -86,10 +86,20 @@ export default function PaymentPage({ user, notice, onAuth }) {
             <Star className="text-champagne" size={22} />
           </div>
           <div className="mt-5 flex flex-wrap items-end gap-3">
+            {hasPlanCrossPrice(selectedPlan) ? (
+              <span className="pb-1 text-xl font-bold text-stone-500 line-through">
+                {getPlanOriginalPriceText(selectedPlan)}
+              </span>
+            ) : null}
             <span className="text-5xl font-black text-champagne">{selectedPlan.priceText}</span>
             <span className="rounded-full bg-plasma px-3 py-1 text-xs font-black text-black">
               {selectedPlan.name}
             </span>
+            {getPlanOfferLabel(selectedPlan) ? (
+              <span className="rounded-full border border-champagne/40 px-3 py-1 text-xs font-black text-champagne">
+                {getPlanOfferLabel(selectedPlan)}
+              </span>
+            ) : null}
           </div>
           <p className="mt-3 text-sm text-stone-400">Select a plan. Features stay the same for every duration.</p>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -114,7 +124,17 @@ export default function PaymentPage({ user, notice, onAuth }) {
                   </span>
                   {item.name}
                 </span>
+                {hasPlanCrossPrice(item) ? (
+                  <span className="mt-3 block text-sm font-bold text-stone-500 line-through">
+                    {getPlanOriginalPriceText(item)}
+                  </span>
+                ) : null}
                 <span className="mt-3 block text-2xl font-black text-champagne">{item.priceText}</span>
+                {getPlanOfferLabel(item) ? (
+                  <span className="mt-2 inline-flex rounded-full bg-plasma/15 px-2 py-1 text-[11px] font-black text-plasma">
+                    {getPlanOfferLabel(item)}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -168,8 +188,15 @@ export default function PaymentPage({ user, notice, onAuth }) {
 
           {error ? <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">{error}</p> : null}
 
+          <div className="mt-6 flex items-start gap-3 rounded-lg border border-champagne/40 bg-champagne/15 p-4 text-sm font-black leading-6 text-champagne shadow-gold">
+            <LockOpen className="mt-0.5 shrink-0" size={18} />
+            <p>
+              To Unlock Premium Access, Complete Your Payment and Then Click "Pay Now".
+            </p>
+          </div>
+
           <button
-            className="mt-7 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-champagne font-black text-black"
+            className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-champagne font-black text-black"
             onClick={openPaymentLink}
             type="button"
           >
@@ -243,4 +270,29 @@ function buildPaymentMessage(template, user, paymentSettings, selectedPlan) {
 
   if (message.toLowerCase().includes("plan:")) return message;
   return `${message} Plan: ${selectedPlan?.name || "Premium"} (${selectedPlan?.priceText || "INR payment"}).`;
+}
+
+function hasPlanCrossPrice(plan) {
+  const amount = Number(plan?.amount || 0);
+  const originalAmount = Number(plan?.originalAmount || 0);
+  return Boolean(plan?.originalPriceText) || (Number.isFinite(amount) && Number.isFinite(originalAmount) && originalAmount > amount);
+}
+
+function getPlanOriginalPriceText(plan) {
+  if (plan?.originalPriceText) return plan.originalPriceText;
+  const originalAmount = Number(plan?.originalAmount || 0);
+  if (!Number.isFinite(originalAmount) || originalAmount <= 0) return "";
+  const rupees = originalAmount >= 1000 ? originalAmount / 100 : originalAmount;
+  return `INR ${rupees}`;
+}
+
+function getPlanOfferLabel(plan) {
+  if (plan?.offerLabel) return plan.offerLabel;
+  const amount = Number(plan?.amount || 0);
+  const originalAmount = Number(plan?.originalAmount || 0);
+  if (!Number.isFinite(amount) || !Number.isFinite(originalAmount) || amount <= 0 || originalAmount <= amount) {
+    return "";
+  }
+  const percentage = Math.round(((originalAmount - amount) / originalAmount) * 100);
+  return percentage > 0 ? `${percentage}% OFF` : "";
 }

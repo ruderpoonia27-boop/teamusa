@@ -1,11 +1,13 @@
 import { BadgeCheck, Crown, Flame, Lock, LockOpen, Play, ShieldCheck, Sparkles, X } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import FilterBar from "../components/FilterBar.jsx";
 import TrustRow from "../components/TrustRow.jsx";
 import VideoPlayerModal from "../components/VideoPlayerModal.jsx";
 import VideoSections from "../components/VideoSections.jsx";
 import { defaultCategories, defaultSections } from "../data/catalog.js";
-import { api } from "../lib/api.js";
+import { api, normalizeAssetUrl } from "../lib/api.js";
+
+const VIDEO_PAGE_SIZE = 500;
 
 export default function HomePage({ token, isPremium, onUnlock }) {
   const [videos, setVideos] = useState([]);
@@ -19,11 +21,26 @@ export default function HomePage({ token, isPremium, onUnlock }) {
   const [heroImageUrl, setHeroImageUrl] = useState(getCachedHeroImage);
   const [showPremiumPrompt, setShowPremiumPrompt] = useState(false);
   const [error, setError] = useState("");
+  const [loadingVideos, setLoadingVideos] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [videoPage, setVideoPage] = useState(1);
+  const [hasMoreVideos, setHasMoreVideos] = useState(false);
 
   useEffect(() => {
-    Promise.all([api("/api/videos", { token }), api("/api/catalog"), api("/api/payment-settings")])
+    let ignore = false;
+    setLoadingVideos(true);
+    setError("");
+
+    Promise.all([
+      api(`/api/videos?page=1&limit=${VIDEO_PAGE_SIZE}`, { token, cacheTtl: 30000 }),
+      api("/api/catalog", { cacheTtl: 300000 }),
+      api("/api/payment-settings", { cacheTtl: 300000 }),
+    ])
       .then(([videoData, catalogData, settingsData]) => {
+        if (ignore) return;
         setVideos(videoData.videos || []);
+        setVideoPage(1);
+        setHasMoreVideos(Boolean(videoData.hasMore));
         setCatalog({
           categories: catalogData.catalog?.categories?.length
             ? catalogData.catalog.categories
@@ -31,10 +48,20 @@ export default function HomePage({ token, isPremium, onUnlock }) {
           sections: catalogData.catalog?.sections?.length ? catalogData.catalog.sections : defaultSections,
         });
         const nextHeroImageUrl = settingsData.settings?.heroImageUrl || "";
-        setHeroImageUrl(nextHeroImageUrl);
-        cacheHeroImage(nextHeroImageUrl);
+        const safeHeroImageUrl = normalizeAssetUrl(nextHeroImageUrl);
+        setHeroImageUrl(safeHeroImageUrl);
+        cacheHeroImage(safeHeroImageUrl);
       })
-      .catch((nextError) => setError(nextError.message || "Could not load videos."));
+      .catch((nextError) => {
+        if (!ignore) setError(nextError.message || "Could not load videos.");
+      })
+      .finally(() => {
+        if (!ignore) setLoadingVideos(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [token, isPremium]);
 
   useEffect(() => {
@@ -63,6 +90,43 @@ export default function HomePage({ token, isPremium, onUnlock }) {
       return matchesCategory && matchesQuery;
     });
   }, [activeCategory, query, videos]);
+
+  const handlePlay = useCallback(
+    (video) => {
+      if (!isPremium) {
+        onUnlock();
+        return;
+      }
+      if (video.sourceMissing || video.hasPlayback === false) {
+        setError("This video source is missing. Please re-upload it from the admin panel.");
+        return;
+      }
+      setSelectedVideo(video);
+    },
+    [isPremium, onUnlock],
+  );
+
+  const loadMoreVideos = async () => {
+    if (loadingMore || !hasMoreVideos) return;
+
+    const nextPage = videoPage + 1;
+    setLoadingMore(true);
+    setError("");
+
+    try {
+      const videoData = await api(`/api/videos?page=${nextPage}&limit=${VIDEO_PAGE_SIZE}`, {
+        token,
+        cacheTtl: 30000,
+      });
+      setVideos((current) => mergeVideos(current, videoData.videos || []));
+      setVideoPage(nextPage);
+      setHasMoreVideos(Boolean(videoData.hasMore));
+    } catch (nextError) {
+      setError(nextError.message || "Could not load more videos.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <>
@@ -129,16 +193,23 @@ export default function HomePage({ token, isPremium, onUnlock }) {
         {error ? <p className="mb-6 rounded-lg bg-red-500/10 p-4 text-red-200">{error}</p> : null}
         <VideoSections
           videos={filteredVideos}
-          sections={catalog.sections}
+          activeCategory={activeCategory}
           isPremium={isPremium}
-          onPlay={(video) => {
-            if (!isPremium) {
-              onUnlock();
-              return;
-            }
-            setSelectedVideo(video);
-          }}
+          loading={loadingVideos}
+          onPlay={handlePlay}
         />
+        {hasMoreVideos ? (
+          <div className="mt-10 grid place-items-center">
+            <button
+              className="inline-flex min-h-12 items-center justify-center rounded-lg border border-champagne/40 bg-champagne/10 px-6 font-black text-champagne transition hover:bg-champagne hover:text-black"
+              disabled={loadingMore}
+              onClick={loadMoreVideos}
+              type="button"
+            >
+              {loadingMore ? "Loading..." : "Load More Videos"}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {!isPremium ? (
@@ -209,7 +280,7 @@ export default function HomePage({ token, isPremium, onUnlock }) {
 
 function getCachedHeroImage() {
   try {
-    return window.localStorage.getItem("teamusa_hero_image") || "";
+    return normalizeAssetUrl(window.localStorage.getItem("teamusa_hero_image") || "");
   } catch {
     return "";
   }
@@ -225,4 +296,18 @@ function cacheHeroImage(url) {
   } catch {
     // Local storage can be unavailable in private browsing; ignore cache failures.
   }
+}
+
+function mergeVideos(current, nextVideos) {
+  const seen = new Set(current.map((video) => video.id || video._id));
+  const merged = [...current];
+
+  for (const video of nextVideos) {
+    const id = video.id || video._id;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(video);
+  }
+
+  return merged;
 }

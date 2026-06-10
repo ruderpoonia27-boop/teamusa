@@ -3,6 +3,7 @@ import React from "react";
 import { demoWatchHistory } from "../data/catalog.js";
 
 export default function DashboardPage({ user, notice, onPayment }) {
+  const isPartner = user?.role === "partner";
   const planSummary = user?.isPremium ? user?.planName || "Premium" : "None";
   const expirySummary = user?.isPremium
     ? user?.remainingDays
@@ -15,8 +16,16 @@ export default function DashboardPage({ user, notice, onPayment }) {
   return (
     <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
       <div className="mb-8">
-        <span className="text-sm font-black uppercase text-amethyst">Member dashboard</span>
+        <span className="text-sm font-black uppercase text-amethyst">
+          {isPartner ? "Partner dashboard" : "Member dashboard"}
+        </span>
         <h1 className="mt-2 text-4xl font-black sm:text-6xl">Welcome, {user?.name || "Member"}</h1>
+        {isPartner ? (
+          <span className="mt-4 inline-flex items-center gap-2 rounded-full border border-plasma/25 bg-plasma/10 px-4 py-2 text-sm font-black text-plasma">
+            <BadgeCheck size={17} />
+            Partner
+          </span>
+        ) : null}
       </div>
 
       {notice ? <p className="mb-5 rounded-lg bg-plasma/10 p-4 text-plasma">{notice}</p> : null}

@@ -19,6 +19,8 @@ export default function App() {
 
   const isPremium = Boolean(user?.isPremium);
   const isAdmin = user?.role === "admin";
+  const isPartner = user?.role === "partner";
+  const isContentManager = isAdmin || isPartner;
 
   useEffect(() => {
     if (!token) return;
@@ -52,10 +54,12 @@ export default function App() {
         user={user}
         isPremium={isPremium}
         isAdmin={isAdmin}
+        isPartner={isPartner}
+        isContentManager={isContentManager}
         onAuth={() => setAuthOpen(true)}
         onHome={() => setView("home")}
         onPayment={() => setView("payment")}
-        onDashboard={() => setView("dashboard")}
+        onDashboard={() => setView(isPartner ? "admin" : "dashboard")}
         onAdmin={() => setView("admin")}
         onLogout={() => {
           clearSession();
@@ -72,7 +76,7 @@ export default function App() {
       {view === "dashboard" ? (
         <DashboardPage user={user} notice={notice} onPayment={() => setView("payment")} />
       ) : null}
-      {view === "admin" ? <AdminPage token={token} isAdmin={isAdmin} /> : null}
+      {view === "admin" ? <AdminPage token={token} user={user} isAdmin={isAdmin} isPartner={isPartner} /> : null}
 
       {authOpen ? (
         <AuthModal
@@ -82,7 +86,7 @@ export default function App() {
           onSuccess={(session) => {
             storeSession(session);
             setAuthOpen(false);
-            setView("payment");
+            setView(["admin", "partner"].includes(session.user?.role) ? "admin" : "payment");
           }}
         />
       ) : null}

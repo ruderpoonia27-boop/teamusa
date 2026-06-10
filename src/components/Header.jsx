@@ -5,6 +5,8 @@ export default function Header({
   user,
   isPremium,
   isAdmin,
+  isPartner,
+  isContentManager,
   onAuth,
   onHome,
   onDashboard,
@@ -38,20 +40,24 @@ export default function Header({
                   </span>
                   <span
                     className={`mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-black ${
-                      isPremium ? "bg-champagne/15 text-champagne" : "bg-white/10 text-stone-300"
+                      isPartner
+                        ? "bg-plasma/15 text-plasma"
+                        : isPremium
+                          ? "bg-champagne/15 text-champagne"
+                          : "bg-white/10 text-stone-300"
                     }`}
                   >
-                    {isPremium ? <Crown size={12} /> : <UserRound size={12} />}
-                    {isPremium ? "Premium" : "Free"}
+                    {isPartner ? <ShieldCheck size={12} /> : isPremium ? <Crown size={12} /> : <UserRound size={12} />}
+                    {isPartner ? "Partner" : isPremium ? "Premium" : "Free"}
                   </span>
                 </span>
               </button>
-              {isAdmin ? (
+              {isContentManager ? (
                 <button
                   className="grid h-10 w-10 place-items-center rounded-lg border border-champagne/20 bg-champagne/10 text-champagne"
                   onClick={onAdmin}
                   type="button"
-                  aria-label="Content panel"
+                  aria-label={isAdmin ? "Admin panel" : "Partner panel"}
                 >
                   <ShieldCheck size={18} />
                 </button>

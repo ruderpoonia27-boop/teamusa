@@ -1,10 +1,11 @@
 import { Eye, Lock, Play, UserRound } from "lucide-react";
-import React, { useState } from "react";
+import React, { memo, useState } from "react";
+import { normalizeAssetUrl } from "../lib/api.js";
 
-export default function VideoCard({ video, isPremium, onPlay }) {
+function VideoCard({ video, isPremium, onPlay }) {
   const isLocked = Boolean(video.locked || (!isPremium && video.premiumOnly !== false));
   const [imageFailed, setImageFailed] = useState(false);
-  const thumbnailUrl = video.thumbnailUrl || video.image || "";
+  const thumbnailUrl = normalizeAssetUrl(video.thumbnailUrl || video.image || "");
 
   return (
     <article className="group overflow-hidden rounded-lg border border-white/10 bg-white/[0.06] transition hover:-translate-y-1 hover:border-champagne/40 hover:shadow-gold">
@@ -13,6 +14,8 @@ export default function VideoCard({ video, isPremium, onPlay }) {
           <img
             alt={video.title}
             className="h-full w-full object-cover transition duration-500"
+            decoding="async"
+            loading="lazy"
             src={thumbnailUrl}
             onError={() => setImageFailed(true)}
           />
@@ -26,6 +29,11 @@ export default function VideoCard({ video, isPremium, onPlay }) {
         {!isLocked && video.duration ? (
           <div className="absolute bottom-3 right-3 rounded-md bg-black/75 px-2 py-1 text-xs font-bold">
             {video.duration}
+          </div>
+        ) : null}
+        {video.sourceMissing ? (
+          <div className="absolute bottom-3 left-3 rounded-md bg-red-500/80 px-2 py-1 text-xs font-black text-white">
+            Source missing
           </div>
         ) : null}
 
@@ -70,6 +78,8 @@ export default function VideoCard({ video, isPremium, onPlay }) {
     </article>
   );
 }
+
+export default memo(VideoCard);
 
 function formatViews(views = 0) {
   if (typeof views === "string") return views;

@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   CheckCircle2,
   Film,
   Loader2,
@@ -15,15 +16,18 @@ import {
   X,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
-import { defaultCategories, defaultSections, premiumPlans } from "../data/catalog.js";
-import { api } from "../lib/api.js";
+import { defaultCategories, premiumPlans } from "../data/catalog.js";
+import { api, clearApiCache, uploadApi } from "../lib/api.js";
 
-function createEmptyVideo(catalog = { categories: defaultCategories, sections: defaultSections }) {
+const supportedVideoExtensions = [".mp4", ".mov", ".m4v", ".webm"];
+const maxVideoUploadSize = 1024 * 1024 * 1024 * 3;
+const videoAccept = ".mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/x-m4v,video/webm";
+
+function createEmptyVideo(catalog = { categories: defaultCategories }) {
   return {
     title: "",
     creator: "",
     category: catalog.categories?.[0] || defaultCategories[0],
-    section: catalog.sections?.[0] || defaultSections[0],
     thumbnail: null,
     generatedThumbnail: null,
     video: null,
@@ -53,12 +57,14 @@ const emptyPaymentForm = {
   plans: premiumPlans.map(toEditablePlan),
 };
 
-export default function AdminPage({ token, isAdmin }) {
+export default function AdminPage({ token, user, isAdmin, isPartner }) {
+  const isContentManager = isAdmin || isPartner;
   const [videos, setVideos] = useState([]);
+  const [brokenVideos, setBrokenVideos] = useState([]);
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState(() => createEmptyVideo());
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
-  const [catalog, setCatalog] = useState({ categories: defaultCategories, sections: defaultSections });
+  const [catalog, setCatalog] = useState({ categories: defaultCategories });
   const [catalogItems, setCatalogItems] = useState([]);
   const [catalogForm, setCatalogForm] = useState({ kind: "category", name: "" });
   const [userPlanSelections, setUserPlanSelections] = useState({});
@@ -68,16 +74,26 @@ export default function AdminPage({ token, isAdmin }) {
   const [formKey, setFormKey] = useState(0);
   const [paymentFormKey, setPaymentFormKey] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!isAdmin || !token) return;
+    if (!isContentManager || !token) return;
     loadVideos();
+    loadBrokenVideos();
     loadCatalog();
-    loadPaymentSettings();
-    loadUsers();
-  }, [isAdmin, token]);
+    if (isAdmin) {
+      loadPaymentSettings();
+      loadUsers();
+    }
+  }, [isContentManager, isAdmin, token]);
+
+  useEffect(() => {
+    if (!isAdmin && !["videos", "broken"].includes(activeSection)) {
+      setActiveSection("videos");
+    }
+  }, [activeSection, isAdmin]);
 
   const loadVideos = async () => {
     try {
@@ -85,6 +101,15 @@ export default function AdminPage({ token, isAdmin }) {
       setVideos(data.videos || []);
     } catch (nextError) {
       setError(nextError.message || "Could not load admin videos.");
+    }
+  };
+
+  const loadBrokenVideos = async () => {
+    try {
+      const data = await api("/api/admin/videos/broken", { token });
+      setBrokenVideos(data.videos || []);
+    } catch (nextError) {
+      setError(nextError.message || "Could not load broken videos.");
     }
   };
 
@@ -99,18 +124,15 @@ export default function AdminPage({ token, isAdmin }) {
 
   const loadCatalog = async () => {
     try {
-      const data = await api("/api/admin/catalog", { token });
+      const data = await api(isAdmin ? "/api/admin/catalog" : "/api/catalog", isAdmin ? { token } : {});
       const nextCatalog = normalizeCatalog(data.catalog);
       setCatalog(nextCatalog);
-      setCatalogItems(data.items || []);
+      setCatalogItems(isAdmin ? data.items || [] : []);
       setForm((current) => ({
         ...current,
         category: nextCatalog.categories.includes(current.category)
           ? current.category
           : nextCatalog.categories[0],
-        section: nextCatalog.sections.includes(current.section)
-          ? current.section
-          : nextCatalog.sections[0],
       }));
     } catch (nextError) {
       setError(nextError.message || "Could not load categories.");
@@ -182,8 +204,9 @@ export default function AdminPage({ token, isAdmin }) {
       const nextCatalog = normalizeCatalog(data.catalog);
       setCatalog(nextCatalog);
       setCatalogItems(data.items || []);
+      clearApiCache("/api/catalog");
       setCatalogForm({ ...catalogForm, name: "" });
-      setNotice(catalogForm.kind === "category" ? "Category added." : "Section added.");
+      setNotice("Category added.");
     } catch (nextError) {
       setError(nextError.message || "Could not save category.");
     } finally {
@@ -199,17 +222,16 @@ export default function AdminPage({ token, isAdmin }) {
       const nextCatalog = normalizeCatalog(data.catalog);
       setCatalog(nextCatalog);
       setCatalogItems(data.items || []);
+      clearApiCache("/api/catalog");
+      clearApiCache("/api/videos");
       setForm((current) => ({
         ...current,
         category: nextCatalog.categories.includes(current.category)
           ? current.category
           : nextCatalog.categories[0],
-        section: nextCatalog.sections.includes(current.section)
-          ? current.section
-          : nextCatalog.sections[0],
       }));
       await loadVideos();
-      setNotice(item.kind === "category" ? "Category deleted." : "Section deleted.");
+      setNotice("Category deleted.");
     } catch (nextError) {
       setError(nextError.message || "Could not delete item.");
     }
@@ -274,6 +296,7 @@ export default function AdminPage({ token, isAdmin }) {
         plans: normalizePremiumPlans(settings.plans),
       });
       setPaymentFormKey((value) => value + 1);
+      clearApiCache("/api/payment-settings");
       setNotice("Payment package updated.");
     } catch (nextError) {
       setError(nextError.message || "Could not update payment package.");
@@ -285,28 +308,35 @@ export default function AdminPage({ token, isAdmin }) {
   const submit = async (event) => {
     event.preventDefault();
     setLoading(true);
+    setUploadProgress(0);
     setNotice("");
     setError("");
 
     try {
       if (editingId) {
-        const data = await api(`/api/admin/videos/${editingId}`, {
+        const data = await uploadApi(`/api/admin/videos/${editingId}`, {
           method: "PATCH",
           token,
           body: await buildVideoFormData(form),
+          onProgress: setUploadProgress,
         });
         setVideos((current) =>
           current.map((video) => ((video._id || video.id) === editingId ? data.video : video)),
         );
+        clearApiCache("/api/videos");
         setNotice("Video updated.");
+        await loadBrokenVideos();
       } else {
-        const data = await api("/api/admin/videos", {
+        const data = await uploadApi("/api/admin/videos", {
           method: "POST",
           token,
           body: await buildVideoFormData(form),
+          onProgress: setUploadProgress,
         });
         setVideos((current) => [data.video, ...current]);
+        clearApiCache("/api/videos");
         setNotice("Video added. Ready for the next upload.");
+        await loadBrokenVideos();
       }
       setForm(createEmptyVideo(catalog));
       setEditingId("");
@@ -315,7 +345,25 @@ export default function AdminPage({ token, isAdmin }) {
       setError(nextError.message || "Could not add video.");
     } finally {
       setLoading(false);
+      setUploadProgress(0);
     }
+  };
+
+  const handleVideoFile = (file, field) => {
+    if (!file) {
+      applyVideoFileWithDuration(null, setForm, field);
+      return;
+    }
+
+    const validationError = validateVideoFile(file);
+    if (validationError) {
+      setError(validationError);
+      setForm((current) => ({ ...current, [field]: null }));
+      return;
+    }
+
+    setError("");
+    applyVideoFileWithDuration(file, setForm, field);
   };
 
   const editVideo = (video) => {
@@ -324,7 +372,6 @@ export default function AdminPage({ token, isAdmin }) {
       title: video.title || "",
       creator: video.creator || "",
       category: video.category || catalog.categories[0],
-      section: video.section || catalog.sections[0],
       thumbnail: null,
       generatedThumbnail: null,
       video: null,
@@ -344,14 +391,16 @@ export default function AdminPage({ token, isAdmin }) {
     setError("");
     try {
       await api(`/api/admin/videos/${videoId}`, { method: "DELETE", token });
+      clearApiCache("/api/videos");
       setNotice("Video removed.");
       await loadVideos();
+      await loadBrokenVideos();
     } catch (nextError) {
       setError(nextError.message || "Could not remove video.");
     }
   };
 
-  if (!isAdmin) {
+  if (!isContentManager) {
     return (
       <section className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
         <div className="glass rounded-lg p-8">
@@ -371,13 +420,23 @@ export default function AdminPage({ token, isAdmin }) {
         <div>
           <span className="inline-flex items-center gap-2 text-sm font-black uppercase text-champagne">
             <ShieldCheck size={18} />
-            Content manager
+            {isPartner ? "Partner panel" : "Content manager"}
           </span>
-          <h1 className="mt-2 text-4xl font-black sm:text-6xl">Content Library</h1>
-          <p className="mt-3 text-stone-300">Add and organize premium videos for members.</p>
+          <h1 className="mt-2 text-4xl font-black sm:text-6xl">
+            {isPartner ? "Partner Dashboard" : "Content Library"}
+          </h1>
+          <p className="mt-3 text-stone-300">
+            {isPartner ? "Upload and manage your own videos." : "Add and organize premium videos for members."}
+          </p>
+          {isPartner ? (
+            <span className="mt-4 inline-flex items-center gap-2 rounded-full border border-plasma/25 bg-plasma/10 px-4 py-2 text-sm font-black text-plasma">
+              <ShieldCheck size={16} />
+              Partner
+            </span>
+          ) : null}
         </div>
         <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300">
-          {videos.length} videos in catalog
+          {isPartner ? `${videos.length} my videos` : `${videos.length} videos in catalog`}
         </div>
       </div>
 
@@ -395,26 +454,36 @@ export default function AdminPage({ token, isAdmin }) {
           onClick={() => setActiveSection("videos")}
         />
         <SectionButton
-          active={activeSection === "users"}
-          icon={<Users size={17} />}
-          label="Users"
-          onClick={() => setActiveSection("users")}
+          active={activeSection === "broken"}
+          icon={<AlertTriangle size={17} />}
+          label={`Broken (${brokenVideos.length})`}
+          onClick={() => setActiveSection("broken")}
         />
-        <SectionButton
-          active={activeSection === "categories"}
-          icon={<Tags size={17} />}
-          label="Categories"
-          onClick={() => setActiveSection("categories")}
-        />
-        <SectionButton
-          active={activeSection === "settings"}
-          icon={<Settings size={17} />}
-          label="Settings"
-          onClick={() => setActiveSection("settings")}
-        />
+        {isAdmin ? (
+          <>
+            <SectionButton
+              active={activeSection === "users"}
+              icon={<Users size={17} />}
+              label="Users"
+              onClick={() => setActiveSection("users")}
+            />
+            <SectionButton
+              active={activeSection === "categories"}
+              icon={<Tags size={17} />}
+              label="Categories"
+              onClick={() => setActiveSection("categories")}
+            />
+            <SectionButton
+              active={activeSection === "settings"}
+              icon={<Settings size={17} />}
+              label="Settings"
+              onClick={() => setActiveSection("settings")}
+            />
+          </>
+        ) : null}
       </div>
 
-      {activeSection === "categories" ? (
+      {isAdmin && activeSection === "categories" ? (
         <div className="grid gap-5 lg:grid-cols-[420px_1fr]">
           <form className="glass grid gap-4 rounded-lg p-6" onSubmit={saveCatalogItem}>
             <h2 className="flex items-center gap-2 text-2xl font-black">
@@ -447,170 +516,229 @@ export default function AdminPage({ token, isAdmin }) {
         </div>
       ) : null}
 
-      {activeSection === "settings" ? (
-      <div className="grid gap-5 lg:grid-cols-[420px_1fr]">
-        <form className="glass grid gap-4 rounded-lg p-6" onSubmit={savePaymentSettings}>
-          <h2 className="flex items-center gap-2 text-2xl font-black">
-            <QrCode size={22} />
-            Payment Package
-          </h2>
-          <AdminInput
-            label="Package Name"
-            value={paymentForm.planName}
-            onChange={(planName) => setPaymentForm({ ...paymentForm, planName })}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <AdminInput
-              label="Current Price INR"
-              value={paymentForm.priceAmount}
-              onChange={(priceAmount) => setPaymentForm(withAutoOffer({ ...paymentForm, priceAmount }))}
-            />
-            <AdminInput
-              label="Cross Price INR"
-              value={paymentForm.originalAmount}
-              onChange={(originalAmount) => setPaymentForm(withAutoOffer({ ...paymentForm, originalAmount }))}
-            />
-          </div>
-          <AdminInput
-            label="Auto Offer"
-            value={paymentForm.offerLabel}
-            onChange={() => {}}
-            readOnly
-          />
-          <div className="grid gap-3 rounded-lg border border-white/10 bg-black/25 p-4">
-            <h3 className="font-black text-white">Premium Plans</h3>
-            {paymentForm.plans.map((plan, index) => (
-              <div className="grid gap-3 rounded-lg bg-white/5 p-3 sm:grid-cols-[1fr_90px_110px]" key={plan.id}>
-                <AdminInput
-                  label="Label"
-                  value={plan.name}
-                  onChange={(name) => updatePaymentPlan(paymentForm, setPaymentForm, index, { name })}
-                />
-                <AdminInput
-                  label="Days"
-                  value={plan.durationDays}
-                  onChange={(durationDays) =>
-                    updatePaymentPlan(paymentForm, setPaymentForm, index, {
-                      durationDays,
-                      name: formatEditablePlanName(plan.id, durationDays),
-                    })
-                  }
-                />
-                <AdminInput
-                  label="Amount INR"
-                  value={plan.amount}
-                  onChange={(amount) => updatePaymentPlan(paymentForm, setPaymentForm, index, { amount })}
-                />
+      {isAdmin && activeSection === "settings" ? (
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <form className="grid gap-5" onSubmit={savePaymentSettings}>
+            <section className="glass rounded-lg p-5 sm:p-6">
+              <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-2xl font-black">
+                    <QrCode size={22} />
+                    Payment Package
+                  </h2>
+                  <p className="mt-1 text-sm text-stone-400">Set the main offer shown on the payment screen.</p>
+                </div>
+                <span className="w-fit rounded-full border border-champagne/30 px-3 py-1 text-xs font-black uppercase text-champagne">
+                  INR
+                </span>
               </div>
-            ))}
-          </div>
-          <AdminInput
-            label="UPI ID"
-            value={paymentForm.upiId}
-            onChange={(upiId) => setPaymentForm({ ...paymentForm, upiId })}
-          />
-          <AdminInput
-            label="Pay Now Link"
-            value={paymentForm.paymentLink}
-            onChange={(paymentLink) => setPaymentForm({ ...paymentForm, paymentLink })}
-          />
-          <AdminInput
-            label="Auto Message"
-            value={paymentForm.paymentMessage}
-            onChange={(paymentMessage) => setPaymentForm({ ...paymentForm, paymentMessage })}
-          />
-          <div key={paymentFormKey}>
-            <AdminFileInput
-              accept="image/*"
-              label="UPI Scanner Image"
-              value={paymentForm.upiQr}
-              onChange={(upiQr) => setPaymentForm({ ...paymentForm, upiQr })}
-            />
-          </div>
-          <div key={`hero-${paymentFormKey}`}>
-            <AdminFileInput
-              accept="image/*"
-              label="Hero Background Image"
-              value={paymentForm.heroImage}
-              onChange={(heroImage) => setPaymentForm({ ...paymentForm, heroImage })}
-            />
-          </div>
-          {paymentForm.qrImageUrl ? (
-            <button
-              className="min-h-10 rounded-lg border border-red-400/20 bg-red-500/10 px-4 text-sm font-bold text-red-200"
-              onClick={() => setPaymentForm({ ...paymentForm, qrImageUrl: "", upiQr: null, clearQr: true })}
-              type="button"
-            >
-              Clear Scanner
-            </button>
-          ) : null}
-          {paymentForm.heroImageUrl ? (
-            <button
-              className="min-h-10 rounded-lg border border-red-400/20 bg-red-500/10 px-4 text-sm font-bold text-red-200"
-              onClick={() =>
-                setPaymentForm({
-                  ...paymentForm,
-                  heroImageUrl: "",
-                  heroImage: null,
-                  clearHero: true,
-                })
-              }
-              type="button"
-            >
-              Clear Hero Image
-            </button>
-          ) : null}
-          <button
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-champagne font-black text-black"
-            disabled={loading}
-            type="submit"
-          >
-            {loading ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
-            Save Package
-          </button>
-        </form>
 
-        <section className="glass rounded-lg p-6">
-          <h2 className="text-2xl font-black">Payment Preview</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-[220px_1fr]">
-            <div className="grid min-h-56 place-items-center rounded-lg bg-white p-3">
-              {paymentForm.qrImageUrl ? (
-                <img className="max-h-52 w-full object-contain" src={paymentForm.qrImageUrl} alt="UPI scanner preview" />
-              ) : (
-                <QrCode className="text-black" size={82} />
-              )}
-            </div>
-            <div>
-              <p className="text-sm font-black uppercase text-champagne">{paymentForm.offerLabel || "Offer"}</p>
-              <h3 className="mt-2 text-3xl font-black">{paymentForm.planName}</h3>
-              <div className="mt-4 flex flex-wrap items-end gap-3">
-                <span className="text-xl text-stone-500 line-through">INR {paymentForm.originalAmount}</span>
-                <span className="text-4xl font-black text-champagne">INR {paymentForm.priceAmount}</span>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <AdminInput
+                    label="Package Name"
+                    value={paymentForm.planName}
+                    onChange={(planName) => setPaymentForm({ ...paymentForm, planName })}
+                  />
+                </div>
+                <AdminInput
+                  label="Current Price INR"
+                  value={paymentForm.priceAmount}
+                  onChange={(priceAmount) => setPaymentForm(withAutoOffer({ ...paymentForm, priceAmount }))}
+                />
+                <AdminInput
+                  label="Cross Price INR"
+                  value={paymentForm.originalAmount}
+                  onChange={(originalAmount) => setPaymentForm(withAutoOffer({ ...paymentForm, originalAmount }))}
+                />
+                <div className="md:col-span-2">
+                  <AdminInput label="Auto Offer" value={paymentForm.offerLabel} onChange={() => {}} readOnly />
+                </div>
               </div>
-              <div className="mt-4 grid gap-2">
-                {paymentForm.plans.map((plan) => (
-                  <p className="rounded-lg bg-white/5 px-3 py-2 text-sm text-stone-300" key={plan.id}>
-                    {plan.name}: INR {plan.amount}
-                  </p>
+            </section>
+
+            <section className="glass rounded-lg p-5 sm:p-6">
+              <div className="mb-5">
+                <h3 className="text-xl font-black text-white">Premium Plans</h3>
+                <p className="mt-1 text-sm text-stone-400">Edit duration, price, and cut price for every plan.</p>
+              </div>
+              <div className="grid gap-3">
+                {paymentForm.plans.map((plan, index) => (
+                  <div
+                    className="grid gap-3 rounded-lg border border-white/10 bg-black/25 p-3 md:grid-cols-[1.2fr_0.6fr_0.8fr_0.9fr]"
+                    key={plan.id}
+                  >
+                    <AdminInput
+                      label="Label"
+                      value={plan.name}
+                      onChange={(name) => updatePaymentPlan(paymentForm, setPaymentForm, index, { name })}
+                    />
+                    <AdminInput
+                      label="Days"
+                      value={plan.durationDays}
+                      onChange={(durationDays) =>
+                        updatePaymentPlan(paymentForm, setPaymentForm, index, {
+                          durationDays,
+                          name: formatEditablePlanName(plan.id, durationDays),
+                        })
+                      }
+                    />
+                    <AdminInput
+                      label="Amount INR"
+                      value={plan.amount}
+                      onChange={(amount) => updatePaymentPlan(paymentForm, setPaymentForm, index, { amount })}
+                    />
+                    <AdminInput
+                      label="Cross Price INR"
+                      value={plan.originalAmount}
+                      onChange={(originalAmount) =>
+                        updatePaymentPlan(paymentForm, setPaymentForm, index, { originalAmount })
+                      }
+                    />
+                  </div>
                 ))}
               </div>
-              {paymentForm.upiId ? <p className="mt-4 text-sm text-stone-300">UPI ID: {paymentForm.upiId}</p> : null}
-              {paymentForm.paymentLink ? (
-                <p className="mt-2 truncate text-sm text-stone-400">Pay Now Link: {paymentForm.paymentLink}</p>
-              ) : null}
-              {paymentForm.paymentMessage ? (
-                <p className="mt-2 text-sm text-stone-400">Auto Message: {paymentForm.paymentMessage}</p>
-              ) : null}
-              {paymentForm.heroImageUrl ? (
-                <p className="mt-2 truncate text-sm text-stone-400">Hero Image: {paymentForm.heroImageUrl}</p>
-              ) : null}
+            </section>
+
+            <section className="glass rounded-lg p-5 sm:p-6">
+              <div className="mb-5">
+                <h3 className="text-xl font-black text-white">Payment Destination</h3>
+                <p className="mt-1 text-sm text-stone-400">UPI details and redirect message used by the Pay Now button.</p>
+              </div>
+              <div className="grid gap-4">
+                <AdminInput
+                  label="UPI ID"
+                  value={paymentForm.upiId}
+                  onChange={(upiId) => setPaymentForm({ ...paymentForm, upiId })}
+                />
+                <AdminInput
+                  label="Pay Now Link"
+                  value={paymentForm.paymentLink}
+                  onChange={(paymentLink) => setPaymentForm({ ...paymentForm, paymentLink })}
+                />
+                <AdminInput
+                  label="Auto Message"
+                  value={paymentForm.paymentMessage}
+                  onChange={(paymentMessage) => setPaymentForm({ ...paymentForm, paymentMessage })}
+                />
+              </div>
+            </section>
+
+            <section className="glass rounded-lg p-5 sm:p-6">
+              <div className="mb-5">
+                <h3 className="text-xl font-black text-white">Images</h3>
+                <p className="mt-1 text-sm text-stone-400">Upload scanner and homepage hero image from gallery.</p>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-white/10 bg-black/25 p-4" key={paymentFormKey}>
+                  <AdminFileInput
+                    accept="image/*"
+                    label="UPI Scanner Image"
+                    value={paymentForm.upiQr}
+                    onChange={(upiQr) => setPaymentForm({ ...paymentForm, upiQr })}
+                  />
+                  {paymentForm.qrImageUrl ? (
+                    <button
+                      className="mt-3 min-h-10 w-full rounded-lg border border-red-400/20 bg-red-500/10 px-4 text-sm font-bold text-red-200"
+                      onClick={() => setPaymentForm({ ...paymentForm, qrImageUrl: "", upiQr: null, clearQr: true })}
+                      type="button"
+                    >
+                      Clear Scanner
+                    </button>
+                  ) : null}
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/25 p-4" key={`hero-${paymentFormKey}`}>
+                  <AdminFileInput
+                    accept="image/*"
+                    label="Hero Background Image"
+                    value={paymentForm.heroImage}
+                    onChange={(heroImage) => setPaymentForm({ ...paymentForm, heroImage })}
+                  />
+                  {paymentForm.heroImageUrl ? (
+                    <button
+                      className="mt-3 min-h-10 w-full rounded-lg border border-red-400/20 bg-red-500/10 px-4 text-sm font-bold text-red-200"
+                      onClick={() =>
+                        setPaymentForm({
+                          ...paymentForm,
+                          heroImageUrl: "",
+                          heroImage: null,
+                          clearHero: true,
+                        })
+                      }
+                      type="button"
+                    >
+                      Clear Hero Image
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+
+            <button
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-champagne font-black text-black shadow-gold"
+              disabled={loading}
+              type="submit"
+            >
+              {loading ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
+              Save Settings
+            </button>
+          </form>
+
+          <aside className="glass h-fit rounded-lg p-5 sm:p-6 xl:sticky xl:top-24">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-2xl font-black">Payment Preview</h2>
+              <span className="rounded-full bg-plasma/15 px-3 py-1 text-xs font-black text-plasma">
+                Live
+              </span>
             </div>
-          </div>
-        </section>
-      </div>
+            <div className="mt-5 grid gap-5">
+              <div className="grid min-h-64 place-items-center rounded-lg bg-white p-3">
+                {paymentForm.qrImageUrl ? (
+                  <img
+                    className="max-h-60 w-full object-contain"
+                    src={paymentForm.qrImageUrl}
+                    alt="UPI scanner preview"
+                  />
+                ) : (
+                  <QrCode className="text-black" size={82} />
+                )}
+              </div>
+              <div>
+                <p className="text-sm font-black uppercase text-champagne">{paymentForm.offerLabel || "Offer"}</p>
+                <h3 className="mt-2 text-3xl font-black">{paymentForm.planName}</h3>
+                <div className="mt-4 flex flex-wrap items-end gap-3">
+                  <span className="text-xl text-stone-500 line-through">INR {paymentForm.originalAmount}</span>
+                  <span className="text-4xl font-black text-champagne">INR {paymentForm.priceAmount}</span>
+                </div>
+                <div className="mt-4 grid gap-2">
+                  {paymentForm.plans.map((plan) => (
+                    <p className="rounded-lg bg-white/5 px-3 py-2 text-sm text-stone-300" key={plan.id}>
+                      {plan.name}:{" "}
+                      {Number(plan.originalAmount) > Number(plan.amount) ? (
+                        <span className="text-stone-500 line-through">INR {plan.originalAmount}</span>
+                      ) : null}{" "}
+                      <span className="font-black text-champagne">INR {plan.amount}</span>{" "}
+                      {calculateOfferLabel(plan.amount, plan.originalAmount) ? (
+                        <span className="text-xs font-black text-plasma">
+                          {calculateOfferLabel(plan.amount, plan.originalAmount)}
+                        </span>
+                      ) : null}
+                    </p>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-2 text-sm text-stone-400">
+                  {paymentForm.upiId ? <p className="truncate">UPI ID: {paymentForm.upiId}</p> : null}
+                  {paymentForm.paymentLink ? <p className="truncate">Pay Now Link: {paymentForm.paymentLink}</p> : null}
+                  {paymentForm.paymentMessage ? <p className="line-clamp-2">Auto Message: {paymentForm.paymentMessage}</p> : null}
+                  {paymentForm.heroImageUrl ? <p className="truncate">Hero Image: {paymentForm.heroImageUrl}</p> : null}
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
       ) : null}
 
-      {activeSection === "users" ? (
+      {isAdmin && activeSection === "users" ? (
         <section className="glass rounded-lg p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
@@ -729,17 +857,107 @@ export default function AdminPage({ token, isAdmin }) {
         </section>
       ) : null}
 
+      {activeSection === "broken" ? (
+        <section className="glass rounded-lg p-4 sm:p-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-2xl font-black">
+                <AlertTriangle size={22} />
+                Broken Videos
+              </h2>
+              <p className="mt-1 text-sm text-stone-400">
+                Failed processing jobs, missing sources, and videos that are not safe to publish.
+              </p>
+            </div>
+            <button
+              className="min-h-10 rounded-lg border border-white/10 bg-white/5 px-4 text-sm font-black text-stone-200"
+              onClick={loadBrokenVideos}
+              type="button"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            {brokenVideos.length ? (
+              brokenVideos.map((video) => (
+                <article
+                  className="grid gap-3 rounded-lg border border-red-400/20 bg-red-500/5 p-3 sm:grid-cols-[120px_minmax(0,1fr)_auto]"
+                  key={video._id || video.id}
+                >
+                  {video.thumbnailUrl ? (
+                    <img
+                      alt={video.title}
+                      className="aspect-video w-full rounded-md object-cover sm:w-[120px]"
+                      decoding="async"
+                      loading="lazy"
+                      src={video.thumbnailUrl}
+                    />
+                  ) : (
+                    <div className="grid aspect-video w-full place-items-center rounded-md bg-white/10 text-xs font-black text-stone-500 sm:w-[120px]">
+                      No image
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="break-words text-base font-black leading-6 text-white sm:text-lg">{video.title}</h3>
+                    <p className="mt-1 text-sm text-stone-400">
+                      {video.category} - {video.status || "unknown"}
+                    </p>
+                    <p className="mt-1 text-xs text-red-200">
+                      {video.processingError || video.playbackError || (video.sourceMissing ? "Video source missing." : "Needs review.")}
+                    </p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      Processing: {video.processingStatus || "unknown"} - Playback: {video.playbackHealthStatus || "unknown"}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 sm:justify-end">
+                    <button
+                      className="grid h-11 w-11 place-items-center rounded-lg border border-champagne/20 bg-champagne/10 text-champagne"
+                      onClick={() => {
+                        editVideo(video);
+                        setActiveSection("videos");
+                      }}
+                      type="button"
+                      aria-label={`Edit ${video.title}`}
+                    >
+                      <Pencil size={17} />
+                    </button>
+                    <button
+                      className="grid h-11 w-11 place-items-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-200"
+                      onClick={() => removeVideo(video._id || video.id)}
+                      type="button"
+                      aria-label={`Remove ${video.title}`}
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="rounded-lg border border-white/10 bg-black/25 p-6 text-sm text-stone-400">
+                No broken videos found.
+              </div>
+            )}
+          </div>
+        </section>
+      ) : null}
+
       {activeSection === "videos" ? (
-      <div className="grid gap-5 lg:grid-cols-[420px_1fr]">
-        <form className="glass grid gap-4 rounded-lg p-6" onSubmit={submit}>
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(360px,520px)_minmax(0,1fr)]">
+        <form className="glass grid auto-rows-max content-start gap-5 rounded-lg p-4 sm:p-6" onSubmit={submit}>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 text-2xl font-black">
-              {editingId ? <Pencil size={22} /> : <Plus size={22} />}
-              {editingId ? "Edit Video" : "Add Video"}
-            </h2>
+            <div>
+              <h2 className="flex items-center gap-2 text-2xl font-black">
+                {editingId ? <Pencil size={22} /> : <Plus size={22} />}
+                {editingId ? "Edit Video" : "Add Video"}
+              </h2>
+              <p className="mt-1 text-sm text-stone-400">
+                {isPartner ? "Upload videos and manage only your own catalog." : "Upload video files and organize them for members."}
+              </p>
+            </div>
             {editingId ? (
               <button
-                className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/5"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5"
                 onClick={() => {
                   setEditingId("");
                   setForm(createEmptyVideo(catalog));
@@ -754,21 +972,13 @@ export default function AdminPage({ token, isAdmin }) {
           </div>
           <AdminInput label="Title" value={form.title} onChange={(title) => setForm({ ...form, title })} />
           <AdminInput label="Creator (Optional)" value={form.creator} onChange={(creator) => setForm({ ...form, creator })} />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <AdminSelect
-              label="Category"
-              value={form.category}
-              options={catalog.categories}
-              onChange={(category) => setForm({ ...form, category })}
-            />
-            <AdminSelect
-              label="Section"
-              value={form.section}
-              options={catalog.sections}
-              onChange={(section) => setForm({ ...form, section })}
-            />
-          </div>
-          <div className="grid gap-3" key={formKey}>
+          <AdminSelect
+            label="Category"
+            value={form.category}
+            options={catalog.categories}
+            onChange={(category) => setForm({ ...form, category })}
+          />
+          <div className="grid gap-3 rounded-lg border border-white/10 bg-black/20 p-3 sm:p-4" key={formKey}>
             <AdminFileInput
               accept="image/*"
               label={editingId ? "Replace Thumbnail (Optional)" : "Thumbnail Image (Optional)"}
@@ -776,31 +986,44 @@ export default function AdminPage({ token, isAdmin }) {
               onChange={(thumbnail) => setForm({ ...form, thumbnail, generatedThumbnail: thumbnail ? null : form.generatedThumbnail })}
             />
             <AdminFileInput
-              accept="video/*"
+              accept={videoAccept}
               label={editingId ? "Replace Default Video" : "Default Video File"}
               value={form.video}
-              onChange={(video) => applyVideoFileWithDuration(video, setForm, "video")}
+              onChange={(video) => handleVideoFile(video, "video")}
             />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-2">
               <AdminFileInput
-                accept="video/*"
+                accept={videoAccept}
                 label="HD Video File (Optional)"
                 value={form.videoHd}
-                onChange={(videoHd) => applyVideoFileWithDuration(videoHd, setForm, "videoHd")}
+                onChange={(videoHd) => handleVideoFile(videoHd, "videoHd")}
               />
               <AdminFileInput
-                accept="video/*"
+                accept={videoAccept}
                 label="SD Video File (Optional)"
                 value={form.videoSd}
-                onChange={(videoSd) => applyVideoFileWithDuration(videoSd, setForm, "videoSd")}
+                onChange={(videoSd) => handleVideoFile(videoSd, "videoSd")}
               />
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+          {loading && uploadProgress > 0 ? (
+            <div className="rounded-lg border border-champagne/20 bg-champagne/10 p-3">
+              <div className="mb-2 flex items-center justify-between text-xs font-black uppercase text-champagne">
+                <span>Uploading</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-black/40">
+                <div
+                  className="h-full rounded-full bg-champagne transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-stone-400">Processing to mobile-ready MP4 after upload.</p>
+            </div>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-3">
             <AdminInput label="Duration" value={form.duration} onChange={(duration) => setForm({ ...form, duration })} />
             <AdminInput label="Views" value={form.views} onChange={(views) => setForm({ ...form, views })} />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
             <AdminSelect
               label="Status"
               value={form.status}
@@ -808,17 +1031,17 @@ export default function AdminPage({ token, isAdmin }) {
               onChange={(status) => setForm({ ...form, status })}
             />
           </div>
-          <label className="flex items-start gap-3 rounded-lg border border-white/10 bg-black/30 p-3 text-sm text-stone-300">
+          <label className="flex min-h-12 items-center gap-3 rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-stone-300">
             <input
               checked={form.premiumOnly}
               onChange={(event) => setForm({ ...form, premiumOnly: event.target.checked })}
               type="checkbox"
-              className="mt-1"
+              className="h-4 w-4 accent-champagne"
             />
             Premium locked until payment
           </label>
           <button
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-champagne font-black text-black"
+            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-champagne px-5 font-black text-black shadow-gold sm:w-auto"
             disabled={loading}
             type="submit"
           >
@@ -827,29 +1050,54 @@ export default function AdminPage({ token, isAdmin }) {
           </button>
         </form>
 
-        <section className="glass rounded-lg p-6">
-          <h2 className="flex items-center gap-2 text-2xl font-black">
-            <Film size={22} />
-            Premium Videos
-          </h2>
+        <section className="glass rounded-lg p-4 sm:p-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-2xl font-black">
+                <Film size={22} />
+                {isPartner ? "My Videos" : "Premium Videos"}
+              </h2>
+              <p className="mt-1 text-sm text-stone-400">
+                {isPartner ? `${videos.length} uploaded by ${user?.name || "Partner"}` : `${videos.length} videos in catalog`}
+              </p>
+            </div>
+          </div>
           <div className="mt-5 grid gap-3">
             {videos.map((video) => (
-              <article className="grid gap-3 rounded-lg border border-white/10 bg-black/25 p-3 md:grid-cols-[90px_1fr_auto]" key={video._id || video.id}>
-                <img
-                  alt={video.title}
-                  className="aspect-video w-full rounded-md object-cover md:w-[90px]"
-                  src={video.thumbnailUrl}
-                />
-                <div>
-                  <h3 className="font-black">{video.title}</h3>
+              <article
+                className="grid gap-3 rounded-lg border border-white/10 bg-black/25 p-3 transition hover:border-champagne/30 sm:grid-cols-[120px_minmax(0,1fr)_auto]"
+                key={video._id || video.id}
+              >
+                {video.thumbnailUrl ? (
+                  <img
+                    alt={video.title}
+                    className="aspect-video w-full rounded-md object-cover sm:w-[120px]"
+                    decoding="async"
+                    loading="lazy"
+                    src={video.thumbnailUrl}
+                  />
+                ) : (
+                  <div className="grid aspect-video w-full place-items-center rounded-md bg-white/10 text-xs font-black text-stone-500 sm:w-[120px]">
+                    No image
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h3 className="break-words text-base font-black leading-6 text-white sm:text-lg">{video.title}</h3>
                   <p className="mt-1 text-sm text-stone-400">
                     {video.creator} • {video.category} • {video.status}
                   </p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {Number(video.views || 0).toLocaleString("en-IN")} views
+                    {isAdmin && video.uploadedByName ? ` - ${video.uploadedByName}` : ""}
+                  </p>
                   <p className="mt-1 truncate text-xs text-stone-500">{video.sourceType || "Protected source"}</p>
+                  {video.sourceMissing ? (
+                    <p className="mt-1 text-xs font-black text-red-200">Source missing - re-upload this video</p>
+                  ) : null}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 sm:justify-end">
                   <button
-                    className="grid h-10 w-10 place-items-center rounded-lg border border-champagne/20 bg-champagne/10 text-champagne"
+                    className="grid h-11 w-11 place-items-center rounded-lg border border-champagne/20 bg-champagne/10 text-champagne"
                     onClick={() => editVideo(video)}
                     type="button"
                     aria-label={`Edit ${video.title}`}
@@ -857,7 +1105,7 @@ export default function AdminPage({ token, isAdmin }) {
                     <Pencil size={17} />
                   </button>
                   <button
-                    className="grid h-10 w-10 place-items-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-200"
+                    className="grid h-11 w-11 place-items-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-200"
                     onClick={() => removeVideo(video._id || video.id)}
                     type="button"
                     aria-label={`Remove ${video.title}`}
@@ -892,10 +1140,10 @@ function SectionButton({ active, icon, label, onClick }) {
 
 function AdminInput({ label, value, onChange, readOnly = false }) {
   return (
-    <label className="grid gap-2 text-sm font-bold text-stone-300">
+    <label className="grid w-full min-w-0 gap-2 text-sm font-bold text-stone-300">
       {label}
       <input
-        className={`min-h-12 rounded-lg border border-white/10 px-4 text-white outline-none ${
+        className={`min-h-12 w-full min-w-0 rounded-lg border border-white/10 px-4 text-white outline-none ${
           readOnly ? "bg-white/5 text-champagne" : "bg-black/30"
         }`}
         value={value}
@@ -908,13 +1156,13 @@ function AdminInput({ label, value, onChange, readOnly = false }) {
 
 function AdminFileInput({ label, accept, value, onChange }) {
   return (
-    <label className="grid gap-2 text-sm font-bold text-stone-300">
+    <label className="grid w-full min-w-0 gap-2 text-sm font-bold text-stone-300">
       {label}
-      <span className="flex min-h-12 items-center gap-3 rounded-lg border border-white/10 bg-black/30 px-4 text-stone-400">
-        <Upload size={17} />
+      <span className="flex min-h-12 min-w-0 flex-col items-stretch gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-3 text-stone-400 sm:flex-row sm:items-center sm:px-4">
+        <Upload className="hidden shrink-0 sm:block" size={17} />
         <input
           accept={accept}
-          className="min-w-0 flex-1 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-champagne file:px-3 file:py-2 file:font-black file:text-black"
+          className="w-full min-w-0 flex-1 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-champagne file:px-3 file:py-2 file:font-black file:text-black"
           onChange={(event) => onChange(event.target.files?.[0] || null)}
           type="file"
         />
@@ -926,10 +1174,10 @@ function AdminFileInput({ label, accept, value, onChange }) {
 
 function AdminSelect({ label, value, options, onChange }) {
   return (
-    <label className="grid gap-2 text-sm font-bold text-stone-300">
+    <label className="grid w-full min-w-0 gap-2 text-sm font-bold text-stone-300">
       {label}
       <select
-        className="min-h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none"
+        className="min-h-12 w-full min-w-0 rounded-lg border border-white/10 bg-black/30 px-4 text-white outline-none"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -990,7 +1238,6 @@ function CatalogList({ title, items, lockedNames = [], onDelete }) {
 function normalizeCatalog(catalog) {
   return {
     categories: catalog?.categories?.length ? catalog.categories : defaultCategories,
-    sections: catalog?.sections?.length ? catalog.sections : defaultSections,
   };
 }
 
@@ -1003,13 +1250,21 @@ function normalizePremiumPlans(plans) {
 }
 
 function toEditablePlan(plan) {
-  const amount = Number(plan.amount || 0);
+  const amount = priceToInputValue(plan.amount, plan.priceText);
+  const originalAmount = priceToInputValue(plan.originalAmount, plan.originalPriceText);
   return {
     id: plan.id,
     name: plan.name || formatEditablePlanName(plan.id, plan.durationDays),
     durationDays: String(plan.durationDays || ""),
-    amount: String(amount ? (amount >= 1000 ? amount / 100 : amount) : plan.priceText ? plan.priceText.replace(/\D/g, "") : ""),
+    amount,
+    originalAmount,
   };
+}
+
+function priceToInputValue(amountValue, priceText = "") {
+  const amount = Number(amountValue || 0);
+  if (amount) return String(amount >= 1000 ? amount / 100 : amount);
+  return priceText ? priceText.replace(/\D/g, "") : "";
 }
 
 function updatePaymentPlan(paymentForm, setPaymentForm, index, updates) {
@@ -1080,6 +1335,27 @@ async function applyVideoFileWithDuration(file, setForm, field) {
   }
 }
 
+function validateVideoFile(file) {
+  const extension = `.${String(file.name || "").split(".").pop()}`.toLowerCase();
+  const isSupportedExtension = supportedVideoExtensions.includes(extension);
+  const isSupportedMime =
+    file.type === "video/mp4" ||
+    file.type === "video/quicktime" ||
+    file.type === "video/x-m4v" ||
+    file.type === "video/webm" ||
+    !file.type;
+
+  if (!isSupportedExtension || !isSupportedMime) {
+    return "Unsupported video format. Please upload MP4, MOV, M4V, or WEBM from your gallery.";
+  }
+
+  if (file.size > maxVideoUploadSize) {
+    return "Video is too large. Maximum upload size is 3 GB.";
+  }
+
+  return "";
+}
+
 function readVideoDuration(file) {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
@@ -1121,7 +1397,7 @@ function generateVideoThumbnail(file) {
       video.currentTime = targetTime;
     };
     video.onseeked = () => {
-      const width = 720;
+      const width = 640;
       const ratio = video.videoWidth ? width / video.videoWidth : 1;
       const height = Math.max(1, Math.round((video.videoHeight || 405) * ratio));
       const canvas = document.createElement("canvas");
@@ -1144,7 +1420,7 @@ function generateVideoThumbnail(file) {
           finish(new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "video"}-thumbnail.jpg`, { type: "image/jpeg" }));
         },
         "image/jpeg",
-        0.82,
+        0.74,
       );
     };
     video.onerror = () => finish(null);
@@ -1168,7 +1444,7 @@ function formatVideoDuration(value) {
 async function buildVideoFormData(form) {
   const payload = new FormData();
 
-  for (const field of ["title", "creator", "category", "section", "duration", "views", "status"]) {
+  for (const field of ["title", "creator", "category", "duration", "views", "status"]) {
     payload.append(field, form[field]);
   }
   payload.append("premiumOnly", String(form.premiumOnly));
