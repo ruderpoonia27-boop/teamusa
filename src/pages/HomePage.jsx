@@ -2,14 +2,13 @@ import { BadgeCheck, Crown, Flame, Lock, LockOpen, Play, ShieldCheck, Sparkles, 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import FilterBar from "../components/FilterBar.jsx";
 import TrustRow from "../components/TrustRow.jsx";
-import VideoPlayerModal from "../components/VideoPlayerModal.jsx";
 import VideoSections from "../components/VideoSections.jsx";
 import { defaultCategories, defaultSections } from "../data/catalog.js";
 import { api, normalizeAssetUrl } from "../lib/api.js";
 
 const VIDEO_PAGE_SIZE = 500;
 
-export default function HomePage({ token, isPremium, onUnlock }) {
+export default function HomePage({ token, isPremium, onUnlock, onWatch }) {
   const [videos, setVideos] = useState([]);
   const [catalog, setCatalog] = useState({
     categories: defaultCategories,
@@ -17,7 +16,6 @@ export default function HomePage({ token, isPremium, onUnlock }) {
   });
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
-  const [selectedVideo, setSelectedVideo] = useState(null);
   const [heroImageUrl, setHeroImageUrl] = useState(getCachedHeroImage);
   const [showPremiumPrompt, setShowPremiumPrompt] = useState(false);
   const [error, setError] = useState("");
@@ -101,9 +99,9 @@ export default function HomePage({ token, isPremium, onUnlock }) {
         setError("This video source is missing. Please re-upload it from the admin panel.");
         return;
       }
-      setSelectedVideo(video);
+      onWatch(video.id || video._id);
     },
-    [isPremium, onUnlock],
+    [isPremium, onUnlock, onWatch],
   );
 
   const loadMoreVideos = async () => {
@@ -223,14 +221,6 @@ export default function HomePage({ token, isPremium, onUnlock }) {
             Unlock All Videos
           </button>
         </div>
-      ) : null}
-
-      {selectedVideo ? (
-        <VideoPlayerModal
-          video={selectedVideo}
-          token={token}
-          onClose={() => setSelectedVideo(null)}
-        />
       ) : null}
 
       {showPremiumPrompt ? (

@@ -132,12 +132,13 @@ function buildApiUrls() {
       : "https:";
   const isLocalHost = ["localhost", "127.0.0.1"].includes(browserHost);
   const localProtocol = browserProtocol === "https:" ? "https:" : "http:";
+  const configuredApiUrl = normalizeApiUrl(import.meta.env.VITE_API_URL);
+
+  if (configuredApiUrl) return [configuredApiUrl];
 
   return [
-    normalizeApiUrl(import.meta.env.VITE_API_URL),
     isLocalHost ? `${localProtocol}//${browserHost}:4000` : "",
-    isLocalHost ? `${localProtocol}//${browserHost}:4001` : "",
-    isLocalHost ? `${localProtocol}//${browserHost}:4002` : "",
+    !isLocalHost ? window.location.origin : "",
   ].filter(Boolean);
 }
 
