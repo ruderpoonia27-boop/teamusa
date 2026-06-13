@@ -1018,7 +1018,7 @@ export default function AdminPage({ token, user, isAdmin, isPartner }) {
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
-              <p className="mt-2 text-xs text-stone-400">Processing to mobile-ready MP4 after upload.</p>
+              <p className="mt-2 text-xs text-stone-400">Upload saves first. Optimization runs in the background.</p>
             </div>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-3">
@@ -1091,6 +1091,17 @@ export default function AdminPage({ token, user, isAdmin, isPartner }) {
                     {isAdmin && video.uploadedByName ? ` - ${video.uploadedByName}` : ""}
                   </p>
                   <p className="mt-1 truncate text-xs text-stone-500">{video.sourceType || "Protected source"}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-black uppercase">
+                    <span className={`rounded-full px-2 py-1 ${statusTone(video.processingStatus)}`}>
+                      {video.processingStatus || "ready"}
+                    </span>
+                    <span className={`rounded-full px-2 py-1 ${healthTone(video.playbackHealthStatus)}`}>
+                      {video.playbackHealthStatus || "unchecked"}
+                    </span>
+                  </div>
+                  {video.processingError ? (
+                    <p className="mt-1 text-xs text-red-200">{video.processingError}</p>
+                  ) : null}
                   {video.sourceMissing ? (
                     <p className="mt-1 text-xs font-black text-red-200">Source missing - re-upload this video</p>
                   ) : null}
@@ -1307,6 +1318,19 @@ function formatDate(value) {
     month: "short",
     year: "numeric",
   });
+}
+
+function statusTone(status = "") {
+  if (status === "ready") return "bg-plasma/15 text-plasma";
+  if (status === "failed") return "bg-red-500/15 text-red-200";
+  if (status === "processing") return "bg-champagne/15 text-champagne";
+  return "bg-white/10 text-stone-300";
+}
+
+function healthTone(status = "") {
+  if (status === "passed") return "bg-plasma/15 text-plasma";
+  if (status === "failed") return "bg-red-500/15 text-red-200";
+  return "bg-white/10 text-stone-300";
 }
 
 async function applyVideoFileWithDuration(file, setForm, field) {

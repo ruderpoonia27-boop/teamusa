@@ -8,7 +8,8 @@ export async function api(path, options = {}) {
   const isFormData = options.body instanceof FormData;
   const method = options.method || "GET";
   const isGet = method === "GET" && !options.body;
-  const cacheTtl = Number(options.cacheTtl ?? (isGet && !options.token ? 60000 : 0));
+  const shouldCachePublicGet = isGet && !options.token && !path.includes("payment-settings");
+  const cacheTtl = Number(options.cacheTtl ?? (shouldCachePublicGet ? 60000 : 0));
   const cacheKey = isGet ? `${options.token ? `auth:${options.token.slice(-12)}` : "public"}:${path}` : "";
 
   if (isGet && cacheTtl > 0) {
